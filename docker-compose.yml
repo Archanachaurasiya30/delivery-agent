@@ -52,6 +52,8 @@ services:
       - DEBUG=true
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=openai/gpt-oss-120b
+      # Demo mode: replay recorded agent responses (zero API keys needed)
+      - DEMO_MODE=${DEMO_MODE:-false}
       # Azure DevOps / TFS work-item sync (values from the repo-root .env)
       - INTEGRATION_PROVIDER=${INTEGRATION_PROVIDER:-mock}
       - PUSH_ENABLED=${PUSH_ENABLED:-true}
@@ -113,6 +115,8 @@ services:
       - DEBUG=true
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=openai/gpt-oss-120b
+      # Demo mode: replay recorded agent responses (zero API keys needed)
+      - DEMO_MODE=${DEMO_MODE:-false}
       - INTEGRATION_PROVIDER=${INTEGRATION_PROVIDER:-mock}
       - PUSH_ENABLED=${PUSH_ENABLED:-true}
       - TFS_URL=${TFS_URL:-}
@@ -172,6 +176,8 @@ services:
       - DEBUG=true
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=openai/gpt-oss-120b
+      # Demo mode: replay recorded agent responses (zero API keys needed)
+      - DEMO_MODE=${DEMO_MODE:-false}
       - INTEGRATION_PROVIDER=${INTEGRATION_PROVIDER:-mock}
       - PUSH_ENABLED=${PUSH_ENABLED:-true}
       - TFS_URL=${TFS_URL:-}

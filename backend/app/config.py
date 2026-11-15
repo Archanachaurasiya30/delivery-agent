@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     llm_provider: str = "litellm"
     llm_model: str = "gpt-4"
 
+    # Demo mode: replay pre-recorded agent responses (proposals, standup
+    # digests, briefs, ask answers) instead of calling any LLM, so the full
+    # UI + live agent loop runs with zero API keys.
+    demo_mode: bool = False
+
     # Deep Agent Configuration
     # LangChain init_chat_model format is "provider:model". Reuse the working
     # Groq setup so proposals run on the same model as the /analyze endpoint.

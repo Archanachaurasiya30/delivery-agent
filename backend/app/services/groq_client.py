@@ -17,6 +17,7 @@ import logging
 import httpx
 
 from app.config import settings
+from app.integrations.demo_llm import demo_completion
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +65,14 @@ async def groq_chat(
 ) -> str:
     """Send a chat completion to Groq and return the response content.
 
+    In DEMO_MODE, replay a pre-recorded response instead (no API key needed).
+
     Raises :class:`GroqError` on a missing key, transport failure, non-200
     response, or empty content.
     """
+    if settings.demo_mode:
+        return demo_completion(messages)
+
     if not settings.groq_api_key:
         raise GroqError("GROQ_API_KEY not configured")
 

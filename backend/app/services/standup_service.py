@@ -4,23 +4,21 @@ Owns the conversation logic (used by the Telegram bot), round lifecycle, and
 the analysis step that feeds collected answers to the standup Deep Agent.
 """
 
-import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.integrations import standup_state
 from app.models.proposal import Proposal
 from app.models.sprint import Sprint
 from app.models.standup import StandupEntry, StandupRound
 from app.models.task import Task
 from app.models.team import TeamMember
+from app.services.groq_client import extract_json, groq_chat
 from app.services.task_service import TaskService
 
 logger = logging.getLogger(__name__)
@@ -35,74 +33,29 @@ QUESTIONS = {
 _NO_BLOCKER_WORDS = {"none", "no", "nope", "n/a", "na", "nothing"}
 
 
-def _extract_json(text: str) -> dict:
-    """Extract the first balanced JSON object from an LLM response."""
-    start = text.find("{")
-    if start == -1:
-        raise ValueError("No JSON object in response")
-    depth = 0
-    in_str = False
-    esc = False
-    for i in range(start, len(text)):
-        ch = text[i]
-        if in_str:
-            if esc:
-                esc = False
-            elif ch == "\\":
-                esc = True
-            elif ch == '"':
-                in_str = False
-            continue
-        if ch == '"':
-            in_str = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return json.loads(text[start : i + 1])
-    raise ValueError("Incomplete JSON object in response")
-
-
 async def _analyze_standup_json(prompt: str) -> dict:
-    """Call Groq for a structured standup analysis and return parsed JSON.
+    """Call the shared Groq client for a structured standup analysis.
 
-    Uses the same proven settings as the /analyze endpoint (reasoning_effort
-    low for gpt-oss so the JSON answer isn't starved of tokens).
+    One LLM choke point for the whole app: ``groq_chat`` owns the key check,
+    the gpt-oss ``reasoning_effort`` handling, and the DEMO_MODE replay of
+    recorded standup digests.
     """
-    if not settings.groq_api_key:
-        raise RuntimeError("GROQ_API_KEY not configured")
-
-    system_prompt = (
-        "You are an AI delivery manager. Analyze the standup and return ONLY a "
-        "single valid JSON object. No markdown, no code fences, no prose outside "
-        "the JSON. The 'summary' field must be plain text (2-3 sentences, no "
-        "markdown)."
-    )
-    payload: dict = {
-        "model": settings.groq_model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
+    content = await groq_chat(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "You are an AI delivery manager. Analyze the standup and return ONLY a "
+                    "single valid JSON object. No markdown, no code fences, no prose outside "
+                    "the JSON. The 'summary' field must be plain text (2-3 sentences, no "
+                    "markdown)."
+                ),
+            },
             {"role": "user", "content": prompt},
         ],
-        "temperature": 0.4,
-        "max_tokens": settings.groq_max_tokens,
-    }
-    if "gpt-oss" in settings.groq_model:
-        payload["reasoning_effort"] = settings.groq_reasoning_effort
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {settings.groq_api_key}",
-            },
-            json=payload,
-        )
-        resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"].get("content") or ""
-    return _extract_json(content)
+        temperature=0.4,
+    )
+    return extract_json(content)
 
 
 @dataclass
