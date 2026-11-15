@@ -54,5 +54,15 @@ def get_task_provider() -> TaskProvider:
             ),
         )
 
+    if settings.integration_provider == "github":
+        # GitHub Issues provider — same contract, for repos that live on GitHub.
+        from app.integrations.github_task_provider import GitHubTaskProvider
+
+        return GitHubTaskProvider(
+            repo=settings.github_repo,
+            token=settings.github_token,
+            read_only=not settings.push_enabled,
+        )
+
     # No simulated failures by default so the demo is deterministic.
     return MockTaskProvider(task_count=20, failure_rate=0.0)

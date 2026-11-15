@@ -83,6 +83,12 @@ class Settings(BaseSettings):
     # Where DumpTaskProvider reads a scripts/tfs-dump.py capture from
     # (INTEGRATION_PROVIDER=dump). Mounted read-only in docker-compose.
     tfs_dump_dir: str = "/dump"
+
+    # GitHub Issues (INTEGRATION_PROVIDER=github)
+    # repo as "owner/name"; token needs repo scope for write-back (PUSH_ENABLED)
+    github_repo: str = ""
+    github_token: str = ""
+
     tfs_sync_interval: int = 300  # periodic pull interval (seconds)
     # Whether the periodic beat job auto-pulls from the external task provider.
     # OFF by default: the mock provider mints a fresh external_id each run, so a
