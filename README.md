@@ -145,7 +145,7 @@ contract; `factory.py` picks the implementation from `INTEGRATION_PROVIDER`):
 | `dump` | ✅ built | Offline replay of a TFS capture — same mapping, no network |
 | `tfs` | ✅ built | Azure DevOps Server / TFS, on-prem auth, area & iteration paths |
 | `github` | ✅ built | GitHub Issues; board columns via `board:*` labels, sprints = milestones |
-| `jira` | ✅ read side | REST v3, status categories + review override, fixVersion = sprint; write side = #11 |
+| `jira` | ✅ read + write | REST v3, status categories + review override, fixVersion = sprint; writes = fields PUT + transitions (PUSH_ENABLED), 410 → POST /search/jql |
 | `linear` | planned | #5 — GraphQL; labels carry board state like the GitHub provider |
 
 Adding one is implementing 5 async methods + 2 optional ones; `github_task_provider.py`

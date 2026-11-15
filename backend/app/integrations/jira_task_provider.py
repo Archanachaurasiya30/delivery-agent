@@ -14,8 +14,10 @@ Maps the generic TaskProvider contract onto a Jira Cloud site (REST v3):
 - area/project       -> Jira has no area paths; project_name is the project key
                         (issue key prefix, e.g. "NW" from NW-42).
 
-Writes (create/update) are not implemented yet — see issue #4. The factory
-still wires read_only=not PUSH_ENABLED so the dial is honored the day they are.
+Writes (create/update) respect the same read_only dial as the other
+providers: PUSH_ENABLED off means this provider refuses to mutate the site.
+Status changes go through /issue/{key}/transitions (Jira has no direct
+status edit); everything else is a PUT on the issue fields.
 """
 
 import asyncio
@@ -32,6 +34,7 @@ from app.integrations.task_provider import (
     ExternalTaskUpdate,
     ExternalTeamMember,
     RateLimitError,
+    ReadOnlyProviderError,
     TaskPage,
     TaskProvider,
     TaskProviderTimeoutError,
@@ -54,6 +57,57 @@ _PRIORITY_NAMES: dict[str, Literal["critical", "medium", "low"]] = {
     "Low": "low",
     "Lowest": "low",
 }
+# Reverse of the read map. Jira's High reads back as "critical", so our "high"
+# can't round-trip — 5 Jira priorities vs our 4, the read map is the truth.
+_OUR_PRIORITY_TO_JIRA: dict[str, str] = {
+    "critical": "Highest",
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low",
+}
+# Board status -> Jira statusCategory.key to transition into.
+_TARGET_CATEGORY: dict[str, str] = {
+    "backlog": "new",
+    "todo": "new",
+    "in_progress": "indeterminate",
+    "review": "indeterminate",
+    "done": "done",
+}
+
+
+def _pick_transition(
+    transitions: list[dict],
+    target: str,
+    review_statuses: list[str],
+) -> dict | None:
+    """Pick the transition that lands the issue in ``target``.
+
+    "review" prefers a transition whose destination column is one of the
+    configured review statuses (same names the read side trusts); every other
+    target matches on destination statusCategory.
+    """
+    if target == "review":
+        for t in transitions:
+            if (t.get("to") or {}).get("name") in review_statuses:
+                return t
+    category = _TARGET_CATEGORY[target]
+    for t in transitions:
+        if ((t.get("to") or {}).get("statusCategory") or {}).get("key") == category:
+            return t
+    return None
+
+
+def _text_doc(text: str | None) -> dict:
+    """Plain text -> Atlassian Document Format (one paragraph per line)."""
+    lines = (text or "").splitlines() or [""]
+    return {
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": line}]}
+            for line in lines
+        ],
+    }
 
 
 def _first(items: list | None) -> dict | None:
@@ -126,6 +180,13 @@ class JiraTaskProvider(TaskProvider):
             timeout=self.timeout,
         )
 
+    def _check_writable(self) -> None:
+        if self.read_only:
+            raise ReadOnlyProviderError(
+                "Jira provider is read-only (PUSH_ENABLED off); "
+                f"refusing to create/update issues on {self.url}"
+            )
+
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         # ponytail: one retry with backoff on 5xx; a real retry queue belongs
         # to the sync job, not the provider.
@@ -193,12 +254,18 @@ class JiraTaskProvider(TaskProvider):
 
     # -- read side --------------------------------------------------------
 
+    async def _search(self, params: dict) -> httpx.Response:
+        """Search; falls back to the POST endpoint on newer Jira Cloud sites
+        that have removed the deprecated GET /rest/api/3/search (410)."""
+        resp = await self._request("GET", "/rest/api/3/search", params=params)
+        if resp.status_code == 410:
+            resp = await self._request("POST", "/rest/api/3/search/jql", json=params)
+        return resp
+
     async def list_tasks(self, page: int = 1, page_size: int = 50) -> TaskPage:
         start_at = (page - 1) * page_size
-        resp = await self._request(
-            "GET",
-            "/rest/api/3/search",
-            params={"jql": self.jql, "startAt": start_at, "maxResults": page_size},
+        resp = await self._search(
+            {"jql": self.jql, "startAt": start_at, "maxResults": page_size}
         )
         if resp.status_code == 400:
             # Jira answers a bad JQL with 400 + an errors object in the body.
@@ -206,13 +273,19 @@ class JiraTaskProvider(TaskProvider):
         resp.raise_for_status()
         body = resp.json()
         issues = body.get("issues", [])
-        total = body.get("total", len(issues))
+        # POST /search/jql has no "total"; per-page truth like the GitHub
+        # provider, and "isLast" when the site provides it.
+        total = body.get("total", start_at + len(issues))
+        if "isLast" in body:
+            has_more = not body["isLast"]
+        else:
+            has_more = start_at + len(issues) < total
         return TaskPage(
             items=[self._map_issue(i) for i in issues],
             total=total,
             page=page,
             page_size=page_size,
-            has_more=start_at + len(issues) < total,
+            has_more=has_more,
         )
 
     async def get_task(self, external_id: str) -> ExternalTask | None:
@@ -234,10 +307,8 @@ class JiraTaskProvider(TaskProvider):
 
     async def _project_key(self) -> str | None:
         """Project the configured JQL points at (key prefix of its first issue)."""
-        resp = await self._request(
-            "GET",
-            "/rest/api/3/search",
-            params={"jql": self.jql, "maxResults": 1, "fields": "key"},
+        resp = await self._search(
+            {"jql": self.jql, "maxResults": 1, "fields": "key"}
         )
         if resp.status_code != 200:
             logger.warning("could not resolve Jira project key; sprints will be empty")
@@ -271,10 +342,93 @@ class JiraTaskProvider(TaskProvider):
 
     # -- write side -------------------------------------------------------
 
+    async def _assignee_id(self, name: str) -> str:
+        """Jira Cloud assigns by accountId, not display name; look it up."""
+        resp = await self._request(
+            "GET", "/rest/api/3/users/search", params={"query": name}
+        )
+        resp.raise_for_status()
+        for user in resp.json():
+            if user.get("active", True) and user.get("accountId") and \
+                    user.get("displayName", "").lower() == name.lower():
+                return user["accountId"]
+        raise ValueError(f"no active Jira user matching {name!r}")
+
+    async def _transition(self, external_id: str, target: str) -> None:
+        """Move an issue to ``target`` via the board's available transitions."""
+        resp = await self._request("GET", f"/rest/api/3/issue/{external_id}/transitions")
+        resp.raise_for_status()
+        transitions = resp.json().get("transitions", [])
+        pick = _pick_transition(transitions, target, self.review_statuses)
+        if pick is None:
+            raise ValueError(
+                f"no transition to {target!r} available on {external_id} "
+                f"(has: {[t.get('name') for t in transitions]})"
+            )
+        resp = await self._request(
+            "POST", f"/rest/api/3/issue/{external_id}/transitions", json={"id": pick["id"]}
+        )
+        resp.raise_for_status()
+
     async def create_task(self, task: ExternalTaskCreate) -> ExternalTask:
-        raise NotImplementedError("Jira write side not implemented yet — see issue #4")
+        self._check_writable()
+        project_key = await self._project_key()
+        if project_key is None:
+            raise ValueError(
+                f"could not resolve a Jira project from JQL {self.jql!r}; "
+                "point JIRA_JQL at one project (e.g. \"project = NW\")"
+            )
+        body = task.description or ""
+        if task.acceptance_criteria:
+            body += f"\n\n## Acceptance criteria\n{task.acceptance_criteria}"
+        fields: dict = {
+            "project": {"key": project_key},
+            "summary": task.title,
+            "issuetype": {"name": "Task"},
+            "description": _text_doc(body or None),
+            "priority": {"name": _OUR_PRIORITY_TO_JIRA[task.priority]},
+        }
+        if task.assignee_name:
+            fields["assignee"] = {"id": await self._assignee_id(task.assignee_name)}
+        resp = await self._request("POST", "/rest/api/3/issue", json={"fields": fields})
+        if resp.status_code == 400:
+            raise ValueError(f"Jira rejected create: {resp.text}")
+        resp.raise_for_status()
+        created = await self.get_task(resp.json()["key"])
+        if created is None:  # deleted between create and read — should not happen
+            raise ValueError(f"issue {resp.json()['key']} vanished right after create")
+        # New issues land in the board's first column; move if asked further.
+        if task.status not in ("backlog", "todo") and created.status != task.status:
+            await self._transition(created.external_id, task.status)
+            created = await self.get_task(created.external_id)
+            assert created is not None
+        return created
 
     async def update_task(
         self, external_id: str, changes: ExternalTaskUpdate
     ) -> ExternalTask:
-        raise NotImplementedError("Jira write side not implemented yet — see issue #4")
+        self._check_writable()
+        current = await self.get_task(external_id)
+        if current is None:
+            raise ValueError(f"issue {external_id} not found in {self.url}")
+
+        fields: dict = {}
+        if changes.title is not None:
+            fields["summary"] = changes.title
+        if changes.description is not None:
+            fields["description"] = _text_doc(changes.description)
+        if changes.priority is not None:
+            fields["priority"] = {"name": _OUR_PRIORITY_TO_JIRA[changes.priority]}
+        if changes.assignee_name is not None:
+            fields["assignee"] = {"id": await self._assignee_id(changes.assignee_name)}
+        if fields:
+            resp = await self._request(
+                "PUT", f"/rest/api/3/issue/{external_id}", json={"fields": fields}
+            )
+            resp.raise_for_status()
+        # PUT returns 204 with no body, so the final state is re-read below.
+        if changes.status is not None and changes.status != current.status:
+            await self._transition(external_id, changes.status)
+        final = await self.get_task(external_id)
+        assert final is not None  # it existed a moment ago; a delete race is fine to crash on
+        return final

@@ -11,7 +11,11 @@ import asyncio
 
 import pytest
 
-from app.integrations.jira_task_provider import JiraTaskProvider
+from app.integrations.jira_task_provider import (
+    DEFAULT_REVIEW_STATUSES,
+    JiraTaskProvider,
+    _doc_text,
+)
 from app.integrations.task_provider import ExternalTaskCreate
 
 P = JiraTaskProvider(url="https://acme.atlassian.net", email="a@b.c", api_token="t")
@@ -125,9 +129,131 @@ def test_url_must_be_absolute():
         JiraTaskProvider(url="acme.atlassian.net", email="a", api_token="t")
 
 
-def test_write_side_not_implemented_yet():
-    with pytest.raises(NotImplementedError):
-        asyncio.run(P.create_task(ExternalTaskCreate(title="x")))
-    from app.integrations.task_provider import ExternalTaskUpdate
-    with pytest.raises(NotImplementedError):
-        asyncio.run(P.update_task("NW-42", ExternalTaskUpdate(status="done")))
+def test_write_side():
+    import asyncio
+    import httpx
+
+    from app.integrations.jira_task_provider import _pick_transition, _text_doc
+    from app.integrations.task_provider import ExternalTaskUpdate, ReadOnlyProviderError
+
+    class FakeJira(JiraTaskProvider):
+        """Records calls, replays canned responses — no network."""
+
+        def __init__(self, responses):
+            super().__init__(url="https://acme.atlassian.net", email="a@b.c", api_token="t")
+            self.responses = list(responses)  # (method, path, status, json_body)
+            self.calls = []
+
+        async def _request(self, method, path, **kwargs):
+            self.calls.append((method, path, kwargs.get("json"), kwargs.get("params")))
+            want_method, want_path, code, body = self.responses.pop(0)
+            assert (method, path) == (want_method, want_path), \
+                f"expected {want_method} {want_path}, got {method} {path}"
+            return httpx.Response(code, json=body, request=httpx.Request(method, path))
+
+    # -- text <-> ADF round-trips (create/update descriptions are ADF-only) --
+    assert _doc_text(_text_doc("one\ntwo")) == "one\ntwo"
+    assert _text_doc(None)["content"] == [{"type": "paragraph", "content": [{"type": "text", "text": ""}]}]
+
+    # -- transition picking --
+    transitions = [
+        {"id": "11", "to": {"name": "In Review", "statusCategory": {"key": "indeterminate"}}},
+        {"id": "31", "to": {"name": "Done", "statusCategory": {"key": "done"}}},
+    ]
+    assert _pick_transition(transitions, "review", DEFAULT_REVIEW_STATUSES)["id"] == "11"
+    assert _pick_transition(transitions, "done", DEFAULT_REVIEW_STATUSES)["id"] == "31"
+    assert _pick_transition([{"id": "31", "to": {"name": "Done", "statusCategory": {"key": "done"}}}],
+                            "in_progress", DEFAULT_REVIEW_STATUSES) is None
+
+    # -- read-only guard fires before any I/O --
+    ro = JiraTaskProvider(url="https://x.atlassian.net", email="a", api_token="t",
+                          read_only=True)
+    with pytest.raises(ReadOnlyProviderError):
+        ro._check_writable()
+    with pytest.raises(ReadOnlyProviderError):
+        asyncio.run(ro.create_task(ExternalTaskCreate(title="x")))
+    with pytest.raises(ReadOnlyProviderError):
+        asyncio.run(ro.update_task("NW-42", ExternalTaskUpdate(status="done")))
+
+    # -- create: project resolved from JQL, description as ADF, priority reversed --
+    p = FakeJira([
+        ("GET", "/rest/api/3/search", 200, {"issues": [{"key": "NW-7"}]}),
+        ("POST", "/rest/api/3/issue", 201, {"key": "NW-99"}),
+        ("GET", "/rest/api/3/issue/NW-99", 200, issue(**{"key": "NW-99"})),
+    ])
+    created = asyncio.run(p.create_task(ExternalTaskCreate(
+        title="Fix checkout", description="Line one\nLine two", priority="critical")))
+    assert created.external_id == "NW-99"
+    method, path, body, _ = p.calls[1]
+    assert (method, path) == ("POST", "/rest/api/3/issue")
+    assert body["fields"]["project"] == {"key": "NW"}
+    assert body["fields"]["description"] == _text_doc("Line one\nLine two")
+    assert body["fields"]["priority"] == {"name": "Highest"}
+    assert body["fields"]["issuetype"] == {"name": "Task"}
+
+    # -- create with a status beyond the first column transitions after create --
+    p = FakeJira([
+        ("GET", "/rest/api/3/search", 200, {"issues": [{"key": "NW-7"}]}),
+        ("POST", "/rest/api/3/issue", 201, {"key": "NW-98"}),
+        ("GET", "/rest/api/3/issue/NW-98", 200, issue(**{"key": "NW-98"})),
+        ("GET", "/rest/api/3/issue/NW-98/transitions", 200, {"transitions": transitions}),
+        ("POST", "/rest/api/3/issue/NW-98/transitions", 204, None),
+        ("GET", "/rest/api/3/issue/NW-98", 200, issue(**{"key": "NW-98",
+            "fields": {"status": status("Done", "done")}})),
+    ])
+    created = asyncio.run(p.create_task(ExternalTaskCreate(title="x", status="done")))
+    assert created.status == "done"
+    assert p.calls[4][2] == {"id": "31"}
+
+    # -- update: PUT fields + transition, re-read for the return value --
+    p = FakeJira([
+        ("GET", "/rest/api/3/issue/NW-42", 200,
+         issue(fields={"status": status("In Dev", "indeterminate")})),
+        ("PUT", "/rest/api/3/issue/NW-42", 204, None),
+        ("GET", "/rest/api/3/issue/NW-42/transitions", 200, {"transitions": transitions}),
+        ("POST", "/rest/api/3/issue/NW-42/transitions", 204, None),
+        ("GET", "/rest/api/3/issue/NW-42", 200, issue(fields={"status": status("Done", "done")})),
+    ])
+    updated = asyncio.run(p.update_task("NW-42", ExternalTaskUpdate(
+        status="done", priority="critical")))
+    assert updated.status == "done"
+    assert p.calls[1][2] == {"fields": {"priority": {"name": "Highest"}}}
+    assert p.calls[3][2] == {"id": "31"}
+    # a status-only no-op (same mapped status) never PUTs or transitions
+    p = FakeJira([
+        ("GET", "/rest/api/3/issue/NW-42", 200,
+         issue(fields={"status": status("In Dev", "indeterminate")})),
+        ("GET", "/rest/api/3/issue/NW-42", 200,
+         issue(fields={"status": status("In Dev", "indeterminate")})),
+    ])
+    asyncio.run(p.update_task("NW-42", ExternalTaskUpdate(status="in_progress")))
+    assert [c[0] for c in p.calls] == ["GET", "GET"]
+
+    # -- assignee: display name resolved to an active accountId --
+    p = FakeJira([
+        ("GET", "/rest/api/3/issue/NW-42", 200, issue()),
+        ("GET", "/rest/api/3/users/search", 200, [
+            {"accountId": "9", "displayName": "Sarah Chen", "active": False},
+            {"accountId": "5b10a2", "displayName": "Sarah Chen", "active": True},
+        ]),
+        ("PUT", "/rest/api/3/issue/NW-42", 204, None),
+        ("GET", "/rest/api/3/issue/NW-42", 200, issue()),
+    ])
+    asyncio.run(p.update_task("NW-42", ExternalTaskUpdate(assignee_name="Sarah Chen")))
+    assert p.calls[1][3] == {"query": "Sarah Chen"}
+    assert p.calls[2][2] == {"fields": {"assignee": {"id": "5b10a2"}}}
+    with pytest.raises(ValueError):  # unknown user is loud, not silently skipped
+        asyncio.run(FakeJira([
+            ("GET", "/rest/api/3/issue/NW-42", 200, issue()),
+            ("GET", "/rest/api/3/users/search", 200, []),
+        ]).update_task("NW-42", ExternalTaskUpdate(assignee_name="Nobody")))
+
+    # -- search: 410 on the deprecated GET falls back to POST /search/jql --
+    p = FakeJira([
+        ("GET", "/rest/api/3/search", 410, {}),
+        ("POST", "/rest/api/3/search/jql", 200, {"issues": [issue()], "isLast": True}),
+    ])
+    page = asyncio.run(p.list_tasks())
+    assert page.has_more is False and len(page.items) == 1
+    assert p.calls[1][1] == "/rest/api/3/search/jql"
+    assert p.calls[1][2]["jql"] == "ORDER BY updated DESC"
