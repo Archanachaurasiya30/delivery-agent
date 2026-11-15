@@ -64,5 +64,21 @@ def get_task_provider() -> TaskProvider:
             read_only=not settings.push_enabled,
         )
 
+    if settings.integration_provider == "jira":
+        # Jira Cloud provider — read side for now (issue #4).
+        from app.integrations.jira_task_provider import JiraTaskProvider
+
+        return JiraTaskProvider(
+            url=settings.jira_url,
+            email=settings.jira_email,
+            api_token=settings.jira_api_token,
+            jql=settings.jira_jql,
+            review_statuses=(
+                [s.strip() for s in settings.jira_review_statuses.split(",") if s.strip()]
+                or None
+            ),
+            read_only=not settings.push_enabled,
+        )
+
     # No simulated failures by default so the demo is deterministic.
     return MockTaskProvider(task_count=20, failure_rate=0.0)

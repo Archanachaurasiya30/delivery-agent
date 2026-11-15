@@ -99,6 +99,16 @@ class Settings(BaseSettings):
     github_repo: str = ""
     github_token: str = ""
 
+    # Jira Cloud (INTEGRATION_PROVIDER=jira)
+    # Site base URL; auth is email + API token (Basic), JQL scopes the sync.
+    jira_url: str = ""             # e.g. https://yourteam.atlassian.net
+    jira_email: str = ""
+    jira_api_token: str = ""
+    jira_jql: str = "ORDER BY updated DESC"
+    # Comma-separated status names that mean "review" whatever their
+    # statusCategory says.
+    jira_review_statuses: str = "In Review,Review,Code Review"
+
     tfs_sync_interval: int = 300  # periodic pull interval (seconds)
     # Whether the periodic beat job auto-pulls from the external task provider.
     # OFF by default: the mock provider mints a fresh external_id each run, so a
