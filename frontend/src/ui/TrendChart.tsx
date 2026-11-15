@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 export interface TrendChartPoint {
   date: string;
@@ -36,10 +36,24 @@ function shortDate(iso: string): string {
  */
 export function TrendChart({ points, width = 720, height = 180 }: TrendChartProps) {
   const gradientId = useId();
+  // Fill the parent (the card) instead of a fixed pixel width.
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [w, setW] = useState(width);
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(([entry]) => {
+      setW(Math.max(320, Math.round(entry.contentRect.width)));
+    });
+    ro.observe(host);
+    return () => ro.disconnect();
+  }, []);
+  width = w;
 
   if (!points || points.length < 2) {
     return (
-      <svg width={width} height={height} role="img" aria-label="Not enough trend data yet">
+      <div ref={hostRef}>
+        <svg width={width} height={height} role="img" aria-label="Not enough trend data yet">
         <line
           x1={PAD_L}
           y1={height / 2}
@@ -58,7 +72,8 @@ export function TrendChart({ points, width = 720, height = 180 }: TrendChartProp
         >
           Not enough trend data yet
         </text>
-      </svg>
+        </svg>
+      </div>
     );
   }
 
@@ -78,7 +93,8 @@ export function TrendChart({ points, width = 720, height = 180 }: TrendChartProp
   const [lastX, lastY] = coords[coords.length - 1];
 
   return (
-    <svg width={width} height={height} role="img" aria-label="Portfolio confidence trend">
+    <div ref={hostRef}>
+      <svg width={width} height={height} role="img" aria-label="Portfolio confidence trend">
       <defs>
         {/* rgba fallback for the accent tint — color-mix may be unavailable. */}
         <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
@@ -128,6 +144,7 @@ export function TrendChart({ points, width = 720, height = 180 }: TrendChartProp
       <text x={width - PAD_R} y={height - 5} textAnchor="end" fontSize={10} fill="var(--ink-mute)">
         {shortDate(points[points.length - 1].date)}
       </text>
-    </svg>
+      </svg>
+    </div>
   );
 }

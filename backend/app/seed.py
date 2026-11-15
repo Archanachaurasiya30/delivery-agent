@@ -236,7 +236,7 @@ async def seed() -> None:
         # Loyalty declining -> Behind.
         snapshots = (
             _backfill_snapshots(messaging_sprint.id, 55.0, 78.0, ahead_on_last=True)
-            + _backfill_snapshots(calendar_sprint.id, 70.0, 48.0, ahead_on_last=False)
+            + _backfill_snapshots(calendar_sprint.id, 58.0, 46.0, ahead_on_last=False)
         )
         session.add_all(snapshots)
 
