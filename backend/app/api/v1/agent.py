@@ -6,7 +6,6 @@ from typing import Any
 from urllib.parse import unquote
 from uuid import UUID
 
-import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -18,7 +17,7 @@ from app.models.proposal import Proposal
 from app.services import proposal_executor
 from app.services.agent_analysis_service import AgentAnalysisService
 from app.services.ask_service import AskService
-from app.services.groq_client import GroqError
+from app.services.groq_client import GroqError, groq_chat
 from app.tasks.agent_tasks import process_agent_request
 
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -497,34 +496,17 @@ async def reject_proposal(
 )
 async def analyze_with_ai(request: AnalyzeRequest) -> AnalyzeResponse:
     """
-    Perform synchronous AI analysis using Groq.
+    Perform synchronous AI analysis via ``groq_chat``.
 
-    This endpoint is used by the frontend for real-time AI analysis
-    of team data, blockers, sprint planning, and release assessment.
-
-    Args:
-        request: Analysis request with prompt and optional system prompt.
-
-    Returns:
-        AI generated response content.
-
-    Raises:
-        HTTPException: If Groq API key not configured or API call fails.
+    Used by the frontend for real-time AI analysis of team data, blockers,
+    sprint planning, and release assessment. In DEMO_MODE a recorded
+    response is replayed with no API key.
     """
-    print(f"🤖 [AGENT] /analyze endpoint called")
-    print(f"🤖 [AGENT] Prompt length: {len(request.prompt)} chars")
-    print(f"🤖 [AGENT] GROQ_API_KEY set: {bool(settings.groq_api_key)}")
-    print(f"🤖 [AGENT] GROQ_MODEL: {settings.groq_model}")
-
-    if not settings.groq_api_key:
-        print("❌ [AGENT] No GROQ_API_KEY configured!")
+    if not settings.demo_mode and not settings.groq_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Groq API key not configured. Set GROQ_API_KEY environment variable.",
         )
-
-    model = settings.groq_model
-    logger.info(f"AI analysis request using model: {model}")
 
     system_prompt = request.system_prompt or (
         "You are an AI delivery manager assistant. Analyze team data and provide "
@@ -532,88 +514,23 @@ async def analyze_with_ai(request: AnalyzeRequest) -> AnalyzeResponse:
         "and recommendations. Always return valid JSON when asked."
     )
 
-    payload: dict[str, Any] = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": request.prompt},
-        ],
-        "temperature": 0.7,
-        "max_tokens": settings.groq_max_tokens,
-    }
-    # gpt-oss reasoning models accept reasoning_effort; sending it to a
-    # non-reasoning model would be rejected, so only attach it for those.
-    if "gpt-oss" in model:
-        payload["reasoning_effort"] = settings.groq_reasoning_effort
-
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {settings.groq_api_key}",
-                },
-                json=payload,
-            )
-
-            print(f"🤖 [AGENT] Groq response status: {response.status_code}")
-
-            if response.status_code != 200:
-                error_detail = response.json().get("error", {}).get("message", "Unknown error")
-                print(f"❌ [AGENT] Groq API error: {response.status_code} - {error_detail}")
-                logger.error(f"Groq API error: {response.status_code} - {error_detail}")
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"Groq API error: {error_detail}",
-                )
-
-            data = response.json()
-            choice = data["choices"][0]
-            content = choice["message"].get("content") or ""
-            finish_reason = choice.get("finish_reason")
-
-            # A reasoning model can exhaust max_tokens on reasoning and return
-            # empty/truncated content with finish_reason="length". Surface that
-            # as an error instead of a misleading 200 with no JSON to parse.
-            if not content.strip():
-                print(
-                    f"❌ [AGENT] Empty content from model (finish_reason={finish_reason})"
-                )
-                logger.error(
-                    f"Groq returned empty content (finish_reason={finish_reason})"
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=(
-                        "AI returned an empty response "
-                        f"(finish_reason={finish_reason}). The model likely ran out "
-                        "of token budget; try a shorter prompt or raise GROQ_MAX_TOKENS."
-                    ),
-                )
-
-            if finish_reason == "length":
-                print(f"⚠️ [AGENT] Response truncated (finish_reason=length)")
-                logger.warning("Groq response truncated (finish_reason=length)")
-
-            print(f"✅ [AGENT] AI analysis success! Response length: {len(content)} chars")
-            logger.info("AI analysis completed successfully")
-            return AnalyzeResponse(content=content, model=model)
-
-    except httpx.TimeoutException:
-        print("❌ [AGENT] Groq API request timed out!")
-        logger.error("Groq API request timed out")
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="AI analysis request timed out",
+        content = await groq_chat(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": request.prompt},
+            ],
+            temperature=0.7,
+            max_tokens=settings.groq_max_tokens,
         )
-    except httpx.RequestError as e:
-        print(f"❌ [AGENT] Groq API request failed: {e}")
-        logger.error(f"Groq API request failed: {e}")
+    except GroqError as e:
+        logger.error(f"AI analysis failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to connect to AI service: {str(e)}",
+            detail=f"AI service error: {e}",
         )
+
+    return AnalyzeResponse(content=content, model=settings.groq_model)
 
 
 @router.post(

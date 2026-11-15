@@ -92,6 +92,62 @@ def test_groq_chat_replays_without_any_api_key():
         settings.demo_mode, settings.groq_api_key = was_demo, was_key
 
 
+def test_analyze_endpoint_replays_in_demo_mode_without_key():
+    """POST /agent/analyze must work with DEMO_MODE=true and no key (issue #10)."""
+    from app.api.v1.agent import AnalyzeRequest, analyze_with_ai
+
+    was_demo, was_key = settings.demo_mode, settings.groq_api_key
+    settings.demo_mode, settings.groq_api_key = True, ""
+    try:
+        resp = asyncio.run(analyze_with_ai(AnalyzeRequest(prompt=STANDUP)))
+        assert resp.content.strip()
+        assert resp.model == settings.groq_model
+    finally:
+        settings.demo_mode, settings.groq_api_key = was_demo, was_key
+
+
+def test_analyze_endpoint_503_without_key_when_not_demo():
+    from fastapi import HTTPException
+
+    from app.api.v1.agent import AnalyzeRequest, analyze_with_ai
+
+    was_demo, was_key = settings.demo_mode, settings.groq_api_key
+    settings.demo_mode, settings.groq_api_key = False, ""
+    try:
+        import pytest
+
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(analyze_with_ai(AnalyzeRequest(prompt="analyze")))
+        assert exc.value.status_code == 503
+    finally:
+        settings.demo_mode, settings.groq_api_key = was_demo, was_key
+
+
+def test_analyze_endpoint_translates_groq_error_to_502():
+    from fastapi import HTTPException
+
+    import app.api.v1.agent as agent_api
+    from app.api.v1.agent import AnalyzeRequest, analyze_with_ai
+    from app.services.groq_client import GroqError
+
+    async def boom(*args, **kwargs):
+        raise GroqError("Groq API error: boom")
+
+    real_chat = agent_api.groq_chat
+    agent_api.groq_chat = boom
+    was_demo, was_key = settings.demo_mode, settings.groq_api_key
+    settings.demo_mode, settings.groq_api_key = False, "fake-key-for-guard"
+    try:
+        import pytest
+
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(analyze_with_ai(AnalyzeRequest(prompt="analyze")))
+        assert exc.value.status_code == 502 and "boom" in exc.value.detail
+    finally:
+        agent_api.groq_chat = real_chat
+        settings.demo_mode, settings.groq_api_key = was_demo, was_key
+
+
 def test_demo_responses_stay_in_the_fictional_world():
     corpus = "\n".join(
         demo_completion(msg(p))
