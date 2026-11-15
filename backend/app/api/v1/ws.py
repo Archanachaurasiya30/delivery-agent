@@ -5,6 +5,7 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.dependencies import PASSCODE_COOKIE, passcode_ok
 from app.ws.manager import ws_manager
 
 router = APIRouter()
@@ -27,6 +28,11 @@ async def websocket_updates(websocket: WebSocket, channel: str = "default") -> N
         - Server sends periodic ping to keep connection alive
         - Client can send pong or any message to confirm alive
     """
+    # Passcode gate (issue #8): middleware can't cover websockets, and
+    # browsers can't send headers on a WS handshake — cookie only.
+    if not passcode_ok(websocket.cookies.get(PASSCODE_COOKIE)):
+        await websocket.close(code=4401)
+        return
     await ws_manager.connect(websocket, channel)
 
     try:

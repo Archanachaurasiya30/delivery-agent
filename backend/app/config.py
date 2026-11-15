@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     # Security
     secret_key: str = "change-me-in-production"
 
+    # Optional passcode gate for exposed deployments (issue #8).
+    # Empty = open (LAN default). When set, requests need the da_passcode
+    # cookie (unlocked at /api/v1/passcode) or an X-Passcode header.
+    passcode: str = ""
+
     # Debug mode
     debug: bool = True
 

@@ -50,6 +50,8 @@ services:
       - DATABASE_URL=postgresql+asyncpg://delivery:delivery@postgres:5432/delivery_agent
       - REDIS_URL=redis://redis:6379/0
       - DEBUG=true
+      # Optional passcode gate for exposed deployments (issue #8)
+      - PASSCODE=${PASSCODE:-}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=openai/gpt-oss-120b
       # Demo mode: replay recorded agent responses (zero API keys needed)

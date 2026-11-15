@@ -1,6 +1,7 @@
 """API v1 router aggregating all endpoints."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.api.v1 import agent, ws
 from app.api.v1.autopilot import router as autopilot_router
@@ -15,6 +16,8 @@ from app.api.v1.standup import router as standup_router
 from app.api.v1.streams import router as streams_router
 from app.api.v1.tasks import router as tasks_router
 from app.api.v1.team import router as team_router
+from app.config import settings
+from app.dependencies import PASSCODE_COOKIE, passcode_ok
 
 router = APIRouter()
 
@@ -43,3 +46,41 @@ async def health_check() -> dict:
     Returns the service status and version for monitoring and load balancer checks.
     """
     return {"status": "ok", "version": "0.1.0"}
+
+
+# --- Optional passcode gate (issue #8) -------------------------------------
+# Under /api/v1 so the page is reachable from both origins (Vite proxies /api).
+_PASSCODE_PAGE = """<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Delivery Agent</title>
+<style>body{font-family:system-ui;display:grid;place-items:center;height:100vh;background:#0f172a;color:#e2e8f0;margin:0}
+form{display:flex;gap:8px;margin-top:16px}input{padding:10px 12px;border-radius:8px;border:1px solid #475569;background:#1e293b;color:inherit}
+button{padding:10px 16px;border-radius:8px;border:0;background:#3b82f6;color:#fff;cursor:pointer}p{color:#94a3b8}p.err{color:#f87171}</style></head>
+<body><div><h2>Delivery Agent</h2><p>This deployment is passcode-protected.</p>
+<p class="err">{ERR}</p>
+<form method="post" action="/api/v1/passcode">
+<input type="password" name="passcode" placeholder="Passcode" autofocus required>
+<button type="submit">Unlock</button></form></div></body></html>"""
+
+
+@router.get("/passcode", response_class=HTMLResponse)
+async def passcode_page() -> str:
+    """Unlock page: form sets the da_passcode cookie the gate checks."""
+    return _PASSCODE_PAGE.replace("{ERR}", "")
+
+
+@router.post("/passcode")
+async def passcode_submit(passcode: str = Form("")):
+    if passcode_ok(passcode):
+        resp = RedirectResponse("/", status_code=303)
+        # ponytail: cookie holds the shared secret itself; signed sessions if
+        # this ever protects more than a demo deployment.
+        resp.set_cookie(
+            PASSCODE_COOKIE,
+            settings.passcode,
+            httponly=True,
+            samesite="lax",
+            max_age=30 * 24 * 3600,
+        )
+        return resp
+    return HTMLResponse(_PASSCODE_PAGE.replace("{ERR}", "Wrong passcode."), status_code=401)
