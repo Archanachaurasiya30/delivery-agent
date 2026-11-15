@@ -1,0 +1,169 @@
+/* ============================================================
+   DELIVERY AGENT — Clean Light Design Tokens
+   Modern product UI: white surfaces, hairline borders,
+   soft diffused shadows, rounded corners, one refined accent.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* ---- Type ---- */
+  --font-sans: 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: var(--font-sans);
+  --font-body: var(--font-sans);
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', 'SFMono-Regular', monospace;
+
+  /* ---- Surfaces ---- */
+  --canvas: #F7F8FA;          /* app background */
+  --surface: #FFFFFF;         /* cards / panels */
+  --surface-2: #F2F3F5;       /* hover / inset */
+  --surface-3: #E9EBEF;       /* tracks */
+
+  /* ---- Text (zinc ramp) ---- */
+  --ink: #18181B;
+  --ink-soft: #52525B;
+  --ink-mute: #9CA3AF;
+
+  /* ---- Lines ---- */
+  --line: #E6E7EB;            /* hairline border */
+  --line-strong: #D6D8DD;
+
+  /* ---- Accent (refined indigo) ---- */
+  --accent: #5B5BD6;
+  --accent-hover: #4F4FCB;
+  --accent-contrast: #FFFFFF;
+  --accent-soft: rgba(91, 91, 214, 0.10);
+  --accent-ring: rgba(91, 91, 214, 0.28);
+
+  /* ---- Functional colors ---- */
+  --accent-2: #3B82F6;        /* info / blue */
+  --danger: #EF4444;
+  --orange: #F97316;
+  --amber: #F59E0B;
+  --success: #10B981;
+  --purple: #8B5CF6;
+  --pink: #EC4899;
+
+  /* soft tints (12% backgrounds) */
+  --tint-blue: rgba(59, 130, 246, 0.12);
+  --tint-danger: rgba(239, 68, 68, 0.12);
+  --tint-orange: rgba(249, 115, 22, 0.12);
+  --tint-amber: rgba(245, 158, 11, 0.14);
+  --tint-success: rgba(16, 185, 129, 0.13);
+  --tint-purple: rgba(139, 92, 246, 0.13);
+  --tint-pink: rgba(236, 72, 153, 0.12);
+  --tint-neutral: rgba(24, 24, 27, 0.06);
+
+  /* ---- Status / priority ---- */
+  --st-progress: #3B82F6;
+  --st-review: #F59E0B;
+  --st-done: #10B981;
+  --st-todo: #9CA3AF;
+  --pr-critical: #EF4444;
+  --pr-high: #F97316;
+  --pr-medium: #F59E0B;
+  --pr-low: #9CA3AF;
+
+  /* ---- Team colors ---- */
+  --team-net: #3B82F6;
+  --team-android: #10B981;
+  --team-ios: #F97316;
+  --team-python: #8B5CF6;
+  --team-testing: #EC4899;
+
+  /* ---- Radii ---- */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /* ---- Borders ---- */
+  --bw: 1px;
+  --bw-thick: 2px;
+
+  /* ---- Shadows (soft, layered) ---- */
+  --shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.05);
+  --shadow: 0 1px 3px rgba(16, 24, 40, 0.08), 0 4px 8px -2px rgba(16, 24, 40, 0.04);
+  --shadow-md: 0 4px 12px -2px rgba(16, 24, 40, 0.10), 0 2px 6px -2px rgba(16, 24, 40, 0.06);
+  --shadow-lg: 0 12px 28px -6px rgba(16, 24, 40, 0.16), 0 6px 12px -4px rgba(16, 24, 40, 0.08);
+
+  /* ---- Spacing ---- */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px;
+
+  /* ---- Motion ---- */
+  --t-fast: 0.12s;
+  --t-base: 0.18s;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ============================================================
+     CHART LAYER — aliases onto the palette above. No new colours.
+
+     Validated with the dataviz palette checker (OKLab ΔE, light
+     surface). Two results are load-bearing and must not be undone:
+
+       1. --accent (#5B5BD6) and --accent-2 (#3B82F6) FAIL the
+          normal-vision separation floor when adjacent (ΔE 10.2,
+          floor 15). They are series 1 and 4 — never neighbours.
+       2. --amber and --orange also fail adjacent (ΔE 9.6), as do
+          --orange and --danger (10.4). So the chart status ramp
+          uses AMBER for "at risk", not the orange scoreColor()
+          uses for badges. Badges are fine: they carry a label.
+
+     Passing orders:
+       categorical  #5B5BD6 #10B981 #F97316 #3B82F6 #EC4899 #F59E0B #8B5CF6
+       status       #10B981 #F59E0B #EF4444
+     ============================================================ */
+
+  /* Categorical — assign in this fixed order, never cycled. */
+  --chart-1: var(--accent);
+  --chart-2: var(--success);
+  --chart-3: var(--orange);
+  --chart-4: var(--accent-2);
+  --chart-5: var(--pink);
+  --chart-6: var(--amber);
+  --chart-7: var(--purple);
+
+  /* Ordered status: good → at risk → behind, plus an absence step. */
+  --chart-good: var(--success);
+  --chart-warn: var(--amber);
+  --chart-bad: var(--danger);
+  --chart-nodata: var(--surface-3);
+
+  /* Structure — recessive by design. */
+  --chart-grid: var(--line);
+  --chart-axis: var(--ink-mute);
+  --chart-ref: var(--ink-mute);      /* reference / ideal / target lines */
+  --chart-track: var(--surface-3);
+  --chart-surface: var(--surface);   /* the 2px gap + marker ring colour */
+
+  /* ============================================================
+     LEGACY ALIASES — old variable names mapped to the modern
+     palette so inline styles + untouched classes stay coherent.
+     ============================================================ */
+  --bg-primary: var(--canvas);
+  --bg-secondary: var(--surface-2);
+  --bg-tertiary: var(--surface-3);
+  --bg-card: var(--surface);
+  --bg-elevated: var(--surface);
+
+  --border: var(--line);
+  --border-light: var(--line);
+
+  --text-primary: var(--ink);
+  --text-secondary: var(--ink-soft);
+  --text-muted: var(--ink-mute);
+
+  --accent-primary: var(--accent);
+  --accent-primary-dim: var(--accent-soft);
+  --accent-secondary: var(--accent-2);
+  --accent-red: var(--danger);
+  --accent-orange: var(--orange);
+  --accent-green: var(--success);
+  --accent-purple: var(--purple);
+  --accent-pink: var(--pink);
+
+  --sidebar-bg: var(--surface);
+  --sidebar-border: var(--line);
+}

@@ -1,0 +1,200 @@
+import { useState } from 'react';
+import {
+  TrendingUp, TrendingDown, Minus, Check, X, Pencil, ChevronRight, ArrowUpCircle,
+} from 'lucide-react';
+import { Badge, type Tone } from '../../ui/Badge';
+import { Button } from '../../ui/Button';
+import { Modal } from '../../ui/Modal';
+import { EmptyState } from '../../ui/EmptyState';
+import {
+  usePortfolio, useApproveProposal, useRejectProposal,
+} from '../../hooks/useApi';
+import type { StreamStatus, StreamDirection, EscalationItem } from '../../types';
+
+// Exported for reuse by the Command Center stream tiles.
+export const STATUS_TONE: Record<StreamStatus, Tone> = {
+  'On track': 'success',
+  Ahead: 'blue',
+  'At risk': 'orange',
+  Behind: 'danger',
+  'No data': 'neutral',
+};
+
+const DIRECTION = {
+  improving: { Icon: TrendingUp, color: 'var(--success)' },
+  declining: { Icon: TrendingDown, color: 'var(--danger)' },
+  steady: { Icon: Minus, color: 'var(--ink-mute)' },
+} as const;
+
+export function DirectionChip({ direction }: { direction: StreamDirection }) {
+  const { Icon, color } = DIRECTION[direction];
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, color }}>
+      <Icon size={15} strokeWidth={2.5} /> {direction}
+    </span>
+  );
+}
+
+interface PortfolioViewProps {
+  onOpenStream: (id: string) => void;
+}
+
+export function PortfolioView({ onOpenStream }: PortfolioViewProps) {
+  const { data, isPending, error } = usePortfolio();
+  const approve = useApproveProposal();
+  const reject = useRejectProposal();
+
+  // One modal drives both "Adjust" (edit note, then approve) and "Decline"
+  // (reason, then reject). Both flow through the existing proposal workflow —
+  // nothing bypasses approve/reject.
+  const [modal, setModal] = useState<{ id: string; mode: 'adjust' | 'decline' } | null>(null);
+  const [text, setText] = useState('');
+
+  const closeModal = () => { setModal(null); setText(''); };
+
+  const confirmModal = () => {
+    if (!modal) return;
+    if (modal.mode === 'adjust') {
+      approve.mutate({ id: modal.id, reason: `Adjusted: ${text}` });
+    } else {
+      reject.mutate({ id: modal.id, reason: text });
+    }
+    closeModal();
+  };
+
+  const busy = approve.isPending || reject.isPending;
+
+  return (
+    <>
+      <header className="header">
+        <h1 className="header-title">Portfolio</h1>
+      </header>
+
+      <div className="content">
+        {error && (
+          <div className="alert alert-error" style={{ marginBottom: 16 }}>
+            <X size={16} strokeWidth={2.5} />
+            <span style={{ flex: 1 }}>{(error as Error).message}</span>
+          </div>
+        )}
+
+        {/* Streams — qualitative status + direction only; no precise numbers. */}
+        <section style={{ marginBottom: 28 }}>
+          <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-mute)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 12 }}>
+            Streams
+          </h2>
+          {isPending ? (
+            <EmptyState>Loading portfolio…</EmptyState>
+          ) : !data || data.streams.length === 0 ? (
+            <EmptyState>No streams yet</EmptyState>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {data.streams.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => onOpenStream(s.id)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 16, textAlign: 'left',
+                    background: 'var(--surface)', border: '1px solid var(--line)',
+                    borderRadius: 'var(--radius-lg)', padding: '16px 18px', cursor: 'pointer',
+                    boxShadow: 'var(--shadow-xs)',
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>{s.name}</div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-mute)', marginTop: 3 }}>
+                      {s.owner_name ? `PM: ${s.owner_name}` : 'Unassigned'} · {s.sprint_count} sprint{s.sprint_count === 1 ? '' : 's'}
+                    </div>
+                  </div>
+                  <Badge tone={STATUS_TONE[s.status]}>{s.status}</Badge>
+                  <DirectionChip direction={s.direction} />
+                  <ChevronRight size={18} strokeWidth={2.25} color="var(--ink-mute)" />
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Escalations — cross-stream / above-a-PM decisions, only surfaced here. */}
+        <section>
+          <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-mute)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 7 }}>
+            <ArrowUpCircle size={15} strokeWidth={2.5} /> Escalations
+          </h2>
+          {isPending ? (
+            <EmptyState>Loading…</EmptyState>
+          ) : !data || data.escalations.length === 0 ? (
+            <EmptyState>No open escalations</EmptyState>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {data.escalations.map((e: EscalationItem) => (
+                <div
+                  key={e.id}
+                  style={{
+                    background: 'var(--surface)', border: '1px solid var(--line)',
+                    borderRadius: 'var(--radius-lg)', padding: 18, boxShadow: 'var(--shadow-xs)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', textTransform: 'capitalize' }}>
+                      {e.type.replace(/_/g, ' ')}
+                    </span>
+                    <Badge tone={e.scope === 'portfolio' ? 'purple' : 'orange'}>{e.scope}</Badge>
+                    {e.escalated && <Badge tone="danger">escalated</Badge>}
+                  </div>
+                  {e.reasoning && (
+                    <p style={{ fontSize: 13, color: 'var(--ink-soft)', lineHeight: 1.6, margin: '0 0 14px' }}>
+                      {e.reasoning}
+                    </p>
+                  )}
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <Button variant="success" disabled={busy} onClick={() => approve.mutate({ id: e.id })} icon={<Check size={15} strokeWidth={3} />}>
+                      Approve
+                    </Button>
+                    <Button variant="secondary" disabled={busy} onClick={() => setModal({ id: e.id, mode: 'adjust' })} icon={<Pencil size={14} strokeWidth={2.5} />}>
+                      Adjust
+                    </Button>
+                    <Button variant="danger" disabled={busy} onClick={() => setModal({ id: e.id, mode: 'decline' })} icon={<X size={15} strokeWidth={3} />}>
+                      Decline
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {modal && (
+          <Modal
+            title={modal.mode === 'adjust' ? 'Adjust & Approve' : 'Decline Escalation'}
+            onClose={closeModal}
+            footer={
+              <>
+                <Button variant="secondary" onClick={closeModal}>Cancel</Button>
+                <Button
+                  variant={modal.mode === 'adjust' ? 'success' : 'danger'}
+                  onClick={confirmModal}
+                  disabled={busy || !text.trim()}
+                >
+                  {modal.mode === 'adjust' ? 'Approve with note' : 'Decline'}
+                </Button>
+              </>
+            }
+          >
+            <p style={{ fontSize: 13, color: 'var(--ink-soft)', marginBottom: 14 }}>
+              {modal.mode === 'adjust'
+                ? 'Add a note describing your adjustment. The proposal is approved with this note attached.'
+                : 'Provide a reason for declining this escalation.'}
+            </p>
+            <textarea
+              className="form-textarea"
+              value={text}
+              onChange={(ev) => setText(ev.target.value)}
+              placeholder={modal.mode === 'adjust' ? 'e.g. Approve, but only for one sprint…' : 'Enter reason…'}
+              style={{ minHeight: 110, resize: 'vertical' }}
+            />
+          </Modal>
+        )}
+      </div>
+    </>
+  );
+}

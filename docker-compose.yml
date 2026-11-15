@@ -1,0 +1,301 @@
+# Docker Compose for Delivery Agent development services
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: delivery-agent-postgres
+    environment:
+      POSTGRES_USER: delivery
+      POSTGRES_PASSWORD: delivery
+      POSTGRES_DB: delivery_agent
+    ports:
+      # Host 5435: 5432 (local postgres + shamel-db), 5433 (smart-assistant),
+      # and 5434 (mini-aps) are taken by other stacks.
+      - "5435:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U delivery -d delivery_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - delivery-network
+
+  redis:
+    image: redis:7.2
+    container_name: delivery-agent-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - delivery-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: delivery-agent-backend
+    ports:
+      # Host 8002: 8000 (mini-aps), 8001 (shamel), 8008 (smart-assistant)
+      # are taken by other stacks. Container stays 8000 (Vite proxy target).
+      - "8002:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://delivery:delivery@postgres:5432/delivery_agent
+      - REDIS_URL=redis://redis:6379/0
+      - DEBUG=true
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_MODEL=openai/gpt-oss-120b
+      # Azure DevOps / TFS work-item sync (values from the repo-root .env)
+      - INTEGRATION_PROVIDER=${INTEGRATION_PROVIDER:-mock}
+      - PUSH_ENABLED=${PUSH_ENABLED:-true}
+      - TFS_URL=${TFS_URL:-}
+      - TFS_PAT=${TFS_PAT:-}
+      - TFS_PROJECT=${TFS_PROJECT:-}
+      - TFS_WORK_ITEM_TYPE=${TFS_WORK_ITEM_TYPE:-Task}
+      - TFS_API_VERSION=${TFS_API_VERSION:-7.1}
+      - TFS_AREA_PATH=${TFS_AREA_PATH:-}
+      - TFS_MAX_ITEMS=${TFS_MAX_ITEMS:-0}
+      - TFS_SYNC_TYPES=${TFS_SYNC_TYPES:-}
+      - TFS_DUMP_DIR=${TFS_DUMP_DIR:-/dump}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME:-}
+      # Webex bot (active chat transport)
+      - WEBEX_BOT_TOKEN=${WEBEX_BOT_TOKEN:-}
+      - WEBEX_BOT_EMAIL=${WEBEX_BOT_EMAIL:-}
+      - WEBEX_WEBHOOK_SECRET=${WEBEX_WEBHOOK_SECRET:-}
+      # LAN address people open the app at (links in Webex messages)
+      - APP_PUBLIC_URL=${APP_PUBLIC_URL:-}
+      # Test mode: all Webex messages go to this address only
+      - WEBEX_REDIRECT_TO=${WEBEX_REDIRECT_TO:-}
+      - WEBEX_LIVE=${WEBEX_LIVE:-false}
+      # Coding agent + Azure Repos (backend constructs the agent + serves repo endpoints)
+      - CODING_AGENT_PROVIDER=${CODING_AGENT_PROVIDER:-mock}
+      - AZURE_REPO_PROJECT=${AZURE_REPO_PROJECT:-}
+      - AZURE_REPO_ID=${AZURE_REPO_ID:-}
+      - AZURE_REPO_DEFAULT_BRANCH=${AZURE_REPO_DEFAULT_BRANCH:-main}
+      - AZURE_PIPELINE_ID=${AZURE_PIPELINE_ID:-}
+      - CODING_AGENT_KNOWN_REPOS=${CODING_AGENT_KNOWN_REPOS-messaging-service,calendar-api,mobile-app}
+      # Executive layer: brief push target + autopilot env-seeded defaults
+      - TELEGRAM_BRIEF_CHAT_ID=${TELEGRAM_BRIEF_CHAT_ID:-}
+      - WEBEX_BRIEF_TARGETS=${WEBEX_BRIEF_TARGETS:-}
+      - AUTOPILOT_DEFAULT_MODE=${AUTOPILOT_DEFAULT_MODE:-auto}
+      - AUTOPILOT_DAILY_LIMIT=${AUTOPILOT_DAILY_LIMIT:-5}
+      - AUTOPILOT_STALE_TASK_DAYS=${AUTOPILOT_STALE_TASK_DAYS:-3}
+      - AUTOPILOT_BLOCKER_ESCALATION_DAYS=${AUTOPILOT_BLOCKER_ESCALATION_DAYS:-5}
+      - AUTOPILOT_TRIAGE_PER_TICK=${AUTOPILOT_TRIAGE_PER_TICK:-3}
+    volumes:
+      - ./backend:/app
+      - ./.tfs-dump:/dump:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - delivery-network
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: delivery-agent-worker
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://delivery:delivery@postgres:5432/delivery_agent
+      - REDIS_URL=redis://redis:6379/0
+      - DEBUG=true
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_MODEL=openai/gpt-oss-120b
+      - INTEGRATION_PROVIDER=${INTEGRATION_PROVIDER:-mock}
+      - PUSH_ENABLED=${PUSH_ENABLED:-true}
+      - TFS_URL=${TFS_URL:-}
+      - TFS_PAT=${TFS_PAT:-}
+      - TFS_PROJECT=${TFS_PROJECT:-}
+      - TFS_WORK_ITEM_TYPE=${TFS_WORK_ITEM_TYPE:-Task}
+      - TFS_API_VERSION=${TFS_API_VERSION:-7.1}
+      - TFS_AREA_PATH=${TFS_AREA_PATH:-}
+      - TFS_MAX_ITEMS=${TFS_MAX_ITEMS:-0}
+      - TFS_SYNC_TYPES=${TFS_SYNC_TYPES:-}
+      - TFS_DUMP_DIR=${TFS_DUMP_DIR:-/dump}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME:-}
+      # Webex bot (standup DMs + autopilot nudges run on this worker)
+      - WEBEX_BOT_TOKEN=${WEBEX_BOT_TOKEN:-}
+      - WEBEX_BOT_EMAIL=${WEBEX_BOT_EMAIL:-}
+      - APP_PUBLIC_URL=${APP_PUBLIC_URL:-}
+      # Test mode: all Webex messages go to this address only
+      - WEBEX_REDIRECT_TO=${WEBEX_REDIRECT_TO:-}
+      - WEBEX_LIVE=${WEBEX_LIVE:-false}
+      # Coding agent + Azure Repos (poll/merge tasks run on this worker)
+      - CODING_AGENT_PROVIDER=${CODING_AGENT_PROVIDER:-mock}
+      - AZURE_REPO_PROJECT=${AZURE_REPO_PROJECT:-}
+      - AZURE_REPO_ID=${AZURE_REPO_ID:-}
+      - AZURE_REPO_DEFAULT_BRANCH=${AZURE_REPO_DEFAULT_BRANCH:-main}
+      - AZURE_PIPELINE_ID=${AZURE_PIPELINE_ID:-}
+      - CODING_AGENT_KNOWN_REPOS=${CODING_AGENT_KNOWN_REPOS-messaging-service,calendar-api,mobile-app}
+      # Executive layer: brief push target + autopilot env-seeded defaults
+      # (brief_tasks + autopilot_tasks run on this worker's default queue)
+      - TELEGRAM_BRIEF_CHAT_ID=${TELEGRAM_BRIEF_CHAT_ID:-}
+      - WEBEX_BRIEF_TARGETS=${WEBEX_BRIEF_TARGETS:-}
+      - AUTOPILOT_DEFAULT_MODE=${AUTOPILOT_DEFAULT_MODE:-auto}
+      - AUTOPILOT_DAILY_LIMIT=${AUTOPILOT_DAILY_LIMIT:-5}
+      - AUTOPILOT_STALE_TASK_DAYS=${AUTOPILOT_STALE_TASK_DAYS:-3}
+      - AUTOPILOT_BLOCKER_ESCALATION_DAYS=${AUTOPILOT_BLOCKER_ESCALATION_DAYS:-5}
+      - AUTOPILOT_TRIAGE_PER_TICK=${AUTOPILOT_TRIAGE_PER_TICK:-3}
+    volumes:
+      - ./backend:/app
+      - ./.tfs-dump:/dump:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - delivery-network
+    command: celery -A app.tasks.celery_app worker --loglevel=info -Q agent,default
+
+  coding-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: delivery-agent-coding-worker
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://delivery:delivery@postgres:5432/delivery_agent
+      - REDIS_URL=redis://redis:6379/0
+      - DEBUG=true
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_MODEL=openai/gpt-oss-120b
+      - INTEGRATION_PROVIDER=${INTEGRATION_PROVIDER:-mock}
+      - PUSH_ENABLED=${PUSH_ENABLED:-true}
+      - TFS_URL=${TFS_URL:-}
+      - TFS_PAT=${TFS_PAT:-}
+      - TFS_PROJECT=${TFS_PROJECT:-}
+      - TFS_WORK_ITEM_TYPE=${TFS_WORK_ITEM_TYPE:-Task}
+      - TFS_API_VERSION=${TFS_API_VERSION:-7.1}
+      - TFS_AREA_PATH=${TFS_AREA_PATH:-}
+      - TFS_MAX_ITEMS=${TFS_MAX_ITEMS:-0}
+      - TFS_SYNC_TYPES=${TFS_SYNC_TYPES:-}
+      - TFS_DUMP_DIR=${TFS_DUMP_DIR:-/dump}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME:-}
+      # Coding agent + Azure Repos (dispatch/revise runs execute here)
+      - CODING_AGENT_PROVIDER=${CODING_AGENT_PROVIDER:-mock}
+      - AZURE_REPO_PROJECT=${AZURE_REPO_PROJECT:-}
+      - AZURE_REPO_ID=${AZURE_REPO_ID:-}
+      - AZURE_REPO_DEFAULT_BRANCH=${AZURE_REPO_DEFAULT_BRANCH:-main}
+      - AZURE_PIPELINE_ID=${AZURE_PIPELINE_ID:-}
+      - CODING_AGENT_KNOWN_REPOS=${CODING_AGENT_KNOWN_REPOS-messaging-service,calendar-api,mobile-app}
+      # Claude Code CLI credentials + workspace for repo clones
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - CLAUDE_CODE_MODEL=${CLAUDE_CODE_MODEL:-}
+      - CLAUDE_CODE_TIMEOUT_SECONDS=${CLAUDE_CODE_TIMEOUT_SECONDS:-1500}
+      - CLAUDE_CODE_WORKSPACE_DIR=/workspaces
+    volumes:
+      - ./backend:/app
+      - ./.tfs-dump:/dump:ro
+      - coding_workspaces:/workspaces
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - delivery-network
+    # -c 1 serializes Claude sessions.
+    command: celery -A app.tasks.celery_app worker --loglevel=info -Q coding -c 1
+
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: delivery-agent-beat
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://delivery:delivery@postgres:5432/delivery_agent
+      - REDIS_URL=redis://redis:6379/0
+      - DEBUG=true
+      - INTEGRATION_PROVIDER=${INTEGRATION_PROVIDER:-mock}
+      - TFS_SYNC_INTERVAL=${TFS_SYNC_INTERVAL:-300}
+      # Periodic external-task auto-sync. Off by default (the mock provider
+      # floods the DB). Set TASK_SYNC_ENABLED=true to schedule the pull.
+      - TASK_SYNC_ENABLED=${TASK_SYNC_ENABLED:-false}
+      - STANDUP_SCHEDULE_CRON=${STANDUP_SCHEDULE_CRON:-0 9 * * *}
+      # Executive layer: morning-brief schedule (UTC) + autopilot tick cadence
+      - MORNING_BRIEF_ENABLED=${MORNING_BRIEF_ENABLED:-true}
+      - MORNING_BRIEF_CRON=${MORNING_BRIEF_CRON:-0 8 * * *}
+      - AUTOPILOT_TICK_INTERVAL=${AUTOPILOT_TICK_INTERVAL:-300}
+    volumes:
+      - ./backend:/app
+      - ./.tfs-dump:/dump:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - delivery-network
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+
+  # Dormant: Webex replaced Telegram as the chat transport. Kept for fallback —
+  # start it explicitly with `docker compose --profile telegram up -d`.
+  telegram-bot:
+    profiles: ["telegram"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: delivery-agent-telegram-bot
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://delivery:delivery@postgres:5432/delivery_agent
+      - REDIS_URL=redis://redis:6379/0
+      - DEBUG=true
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME:-}
+    volumes:
+      - ./backend:/app
+      - ./.tfs-dump:/dump:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - delivery-network
+    command: python -m app.integrations.telegram_bot
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: delivery-agent-frontend
+    ports:
+      # Host 3002 (container stays 3000): 3000 (shamel) and 3001 (mini-aps)
+      # are taken, and a distinct origin keeps service worker / cache separate.
+      - "3002:3000"
+    environment:
+      # Unused by the app (it calls relative /api through the Vite proxy), so
+      # the UI works from any machine on the network.
+      - VITE_API_URL=http://localhost:8002
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - delivery-network
+    command: npm run dev -- --host 0.0.0.0 --port 3000
+
+volumes:
+  postgres_data:
+  redis_data:
+  frontend_node_modules:
+  coding_workspaces:
+
+networks:
+  delivery-network:
+    driver: bridge

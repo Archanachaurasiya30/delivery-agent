@@ -1,0 +1,30 @@
+ID,Work Item Type,Title 1,Title 2,Title 3,Tags,Description
+,Epic,Storefront,,,stream,"Customer storefront: cart, checkout, order status, notifications."
+,Feature,,Core Storefront,,feature,"Core storefront: catalog, cart, checkout, order status, invites."
+,Task,,,Storefront Full test Cycle 6,Quality,
+,Task,,,"O1 - As a system, I want to create a section in the storefront catalog",Platform,
+,Task,,,"O2 - As a Storefront user, I want to be able to share a cart with another Storefront user",Platform,
+,Task,,,"O3 - As a Storefront user, I want to receive order status updates",Mobile,
+,Task,,,"O4 - As a Storefront user, I want to know the status of the orders I placed",Mobile,
+,Task,,,"O5 - As a Storefront user, I want to know the status of my delivery",Mobile,
+,Task,,,"O1.1 - As a Storefront User, I want to send a group order invite to another Storefront user",Mobile,
+,Task,,,"O1.3 - As a Storefront iOS user, I want to be able to select saved addresses",Mobile,
+,Task,,,"O1.2 - As a Storefront user, I want to invite another user from my device contacts",Mobile,
+,Feature,,Notifications,,feature,"Push/silent order notifications and order hold flags."
+,Task,,,Support sending silent order notifications,Platform,
+,Task,,,Add flag to notifications to show order hold status,Platform,
+,Task,,,Use dynamic templates to trigger order actions,Mobile,
+,Task,,,Order number generator on DB,Mobile,
+,Epic,Loyalty & Infra,,,stream,"Loyalty services, CDN, infra hardening, release 2.0 audit."
+,Feature,,Loyalty Services,,feature,"Loyalty DAL, performance and test automation."
+,Task,,,Refactor and Create automation test cases Phase 10,Quality,
+,Task,,,TP001 - [Loyalty] Update DAL for all get services,Platform,
+,Task,,,Review and prepare to merge V0 to development,Quality,
+,Task,,,Optimize Loyalty Points Initial Load with Progressive Fetching,Platform,
+,Feature,,Infra & Release 2.0,,feature,"CDN for Pulse, Redis, logging, EF migration and the release 2.0 audit."
+,Task,,,TP002 - [Pulse] Documentation for CDN suggested solution,Platform,
+,Task,,,TP003 - [Pulse] POC for CDN suggested solution,Platform,
+,Task,,,Move EF migration to be a separated project,Quality,
+,Task,,,Update the projects to use Redis Sentinel,Platform,
+,Task,,,Send logs to Elastic,Mobile,
+,Task,,,Security audit for release 2.0,Quality,

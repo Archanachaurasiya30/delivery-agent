@@ -1,0 +1,9 @@
+/* ============================================================
+   DELIVERY AGENT — global stylesheet entry
+   Neo-Brutalist design system. Load order matters:
+   tokens → base → animations → components.
+   ============================================================ */
+@import './styles/tokens.css';
+@import './styles/base.css';
+@import './styles/animations.css';
+@import './styles/components.css';

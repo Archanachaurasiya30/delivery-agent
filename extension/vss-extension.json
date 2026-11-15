@@ -1,0 +1,48 @@
+{
+    "manifestVersion": 1,
+    "id": "delivery-agent-app",
+    "version": "1.0.1",
+    "name": "Delivery Agent Hub",
+    "description": "AI delivery manager for Azure DevOps: sprint-planning proposals, blocker detection, standup synthesis, release-confidence, and a coding-agent PR loop — surfaced as a hub on top of your work items.",
+    "publisher": "delivery-agent",
+    "public": false,
+    "categories": ["Azure Boards"],
+    "targets": [
+        {
+            "id": "Microsoft.VisualStudio.Services"
+        }
+    ],
+    "contributions": [
+        {
+            "id": "delivery-agent-hub-group",
+            "type": "ms.vss-web.hub-group",
+            "description": "Top-level 'Delivery Agent' project navigation group.",
+            "targets": [
+                "ms.vss-web.project-hub-groups-collection"
+            ],
+            "properties": {
+                "name": "Delivery Agent",
+                "order": 100
+            }
+        },
+        {
+            "id": "delivery-agent-hub",
+            "type": "ms.vss-web.hub",
+            "description": "Delivery Agent hub: proposals queue, AI agent actions, and confidence/portfolio views.",
+            "targets": [
+                ".delivery-agent-hub-group"
+            ],
+            "properties": {
+                "name": "Overview",
+                "order": 1,
+                "uri": "web/index.ado.html"
+            }
+        }
+    ],
+    "files": [
+        {
+            "path": "web",
+            "addressable": true
+        }
+    ]
+}

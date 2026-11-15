@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "delivery-agent"
+version = "0.1.0"
+description = "AI-powered delivery agent for smart sprint planning and team coordination"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Delivery Agent Team"}
+]
+
+dependencies = [
+    # Web framework
+    "fastapi[all]>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+
+    # Database
+    "sqlalchemy[asyncio]>=2.0.25",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.1",
+
+    # Validation and settings
+    "pydantic>=2.5.3",
+    "pydantic-settings>=2.1.0",
+
+    # LLM and AI - Deep Agents (includes LangGraph + LangChain)
+    "deepagents>=0.3.12",
+    "litellm>=1.20.0",
+    "langchain-groq>=0.2.0",  # Groq chat model provider for Deep Agents
+
+    # Task queue
+    "celery[redis]>=5.3.6",
+    "redis>=5.0.1",
+
+    # HTTP client
+    "httpx>=0.26.0",
+
+    # Utilities
+    "python-dotenv>=1.0.0",
+    "structlog>=24.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.4",
+    "pytest-asyncio>=0.23.3",
+    "httpx>=0.26.0",
+    "ruff>=0.1.14",
+    "mypy>=1.8.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true

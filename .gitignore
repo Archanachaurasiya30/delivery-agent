@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+*.egg
+dist/
+build/
+.venv/
+venv/
+ENV/
+.env
+
+# Node
+node_modules/
+dist/
+.npm/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local config
+.env
+.env.local
+*.log
+
+# Azure DevOps extension build artifacts
+extension/web/
+*.vsix
+
+# Celery runtime state
+celerybeat-schedule
+celerybeat.pid
+
+# Local dumps of real Azure DevOps work items (scripts/tfs-dump.py).
+# Internal data — never commit.
+.tfs-dump/
+
+# Local DB backups taken before destructive cleanups (contain real internal data).
+.backups/
