@@ -228,3 +228,36 @@ class BriefService:
             lines.append(narrative)
 
         return "\n".join(lines)[:_WEBEX_MAX_CHARS]
+
+    # ------------------------------------------------------------------
+    # Plain markdown export (wiki/status-doc pasting — no transport cap)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def to_markdown(brief: Brief) -> str:
+        content = brief.content or {}
+        lines: list[str] = [f"# Morning brief — {brief.brief_date}"]
+        if brief.headline:
+            lines.append(f"**{brief.headline}**")
+
+        sections = [
+            ("Shipped", content.get("shipped") or []),
+            ("AI workforce", content.get("ai_delivered") or []),
+            ("Risks", content.get("risks") or []),
+            ("Needs your decision", content.get("needs_decision") or []),
+        ]
+        for title, items in sections:
+            if not items:
+                continue
+            lines.append(f"\n## {title}")
+            lines.extend(f"- {item}" for item in items)
+
+        numbers = content.get("numbers") or {}
+        if numbers:
+            lines.append("\n## Numbers")
+            lines.extend(f"- {k}: {v}" for k, v in numbers.items())
+
+        narrative = content.get("narrative")
+        if narrative:
+            lines.append(f"\n## Narrative\n{narrative}")
+
+        return "\n".join(lines)

@@ -10,6 +10,7 @@ from datetime import date, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,6 +67,22 @@ async def get_latest_brief(
     )
     brief = result.scalar_one_or_none()
     return BriefResponse.of(brief) if brief else None
+
+
+@router.get("/{brief_id}/markdown", response_class=PlainTextResponse)
+async def get_brief_markdown(
+    brief_id: str, db: AsyncSession = Depends(get_db)
+) -> PlainTextResponse:
+    """A brief as plain markdown — for pasting into wikis and status docs."""
+    result = await db.execute(select(Brief).where(Brief.id == brief_id))
+    brief = result.scalar_one_or_none()
+    if brief is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Brief not found"
+        )
+    return PlainTextResponse(
+        BriefService.to_markdown(brief), media_type="text/markdown"
+    )
 
 
 @router.post("/generate", response_model=BriefResponse)

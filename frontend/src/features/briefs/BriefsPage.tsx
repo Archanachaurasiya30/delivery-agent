@@ -3,6 +3,7 @@ import {
   AlertTriangle, Bot, ClipboardCheck, Clock, FileText, Newspaper, Rocket, Sparkles,
 } from 'lucide-react';
 import { useBriefs, useGenerateBrief } from '../../hooks/useApi';
+import { apiFetch } from '../../lib/api';
 import type { Brief } from '../../types';
 import { Button } from '../../ui/Button';
 import { EmptyState } from '../../ui/EmptyState';
@@ -32,6 +33,16 @@ function ListSection({
 function BriefReader({ brief }: { brief: Brief }) {
   const content = brief.content ?? {};
   const numbers = Object.entries(content.numbers ?? {}).slice(0, 4);
+  const [copied, setCopied] = useState(false);
+
+  const copyMarkdown = async () => {
+    const res = await apiFetch(`/api/v1/briefs/${brief.id}/markdown`);
+    if (!res.ok) return;  // same silent-failure UX as AgentPage's Copy button
+    await navigator.clipboard?.writeText(await res.text());
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
   return (
     <div className="agent-report">
       <div className="report-header">
@@ -42,7 +53,10 @@ function BriefReader({ brief }: { brief: Brief }) {
             <span className="report-id">{briefDate(brief.brief_date)}</span>
           </div>
         </div>
-        <span className="report-time"><Clock size={14} strokeWidth={2.5} /> {relTime(brief.created_at)}</span>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <Button variant="ghost" onClick={copyMarkdown}>{copied ? 'Copied ✓' : 'Copy markdown'}</Button>
+          <span className="report-time"><Clock size={14} strokeWidth={2.5} /> {relTime(brief.created_at)}</span>
+        </div>
       </div>
 
       {numbers.length > 0 && (
