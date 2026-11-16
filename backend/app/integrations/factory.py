@@ -80,5 +80,19 @@ def get_task_provider() -> TaskProvider:
             read_only=not settings.push_enabled,
         )
 
+    if settings.integration_provider == "linear":
+        # Linear provider — GraphQL, same contract (issue #5).
+        from app.integrations.linear_task_provider import LinearTaskProvider
+
+        return LinearTaskProvider(
+            api_key=settings.linear_api_key,
+            team_key=settings.linear_team_key,
+            review_statuses=(
+                [s.strip() for s in settings.linear_review_statuses.split(",") if s.strip()]
+                or None
+            ),
+            read_only=not settings.push_enabled,
+        )
+
     # No simulated failures by default so the demo is deterministic.
     return MockTaskProvider(task_count=20, failure_rate=0.0)

@@ -146,7 +146,7 @@ contract; `factory.py` picks the implementation from `INTEGRATION_PROVIDER`):
 | `tfs` | ✅ built | Azure DevOps Server / TFS, on-prem auth, area & iteration paths |
 | `github` | ✅ built | GitHub Issues; board columns via `board:*` labels, sprints = milestones |
 | `jira` | ✅ read + write | REST v3, status categories + review override, fixVersion = sprint; writes = fields PUT + transitions (PUSH_ENABLED), 410 → POST /search/jql |
-| `linear` | planned | #5 — GraphQL; labels carry board state like the GitHub provider |
+| `linear` | ✅ read + write | GraphQL API, state types + review override, cycle = sprint, estimate = story points; writes = issueCreate/issueUpdate via resolved team + workflow state (PUSH_ENABLED) |
 
 Adding one is implementing 5 async methods + 2 optional ones; `github_task_provider.py`
 (~300 lines) is the reference. All providers honor `PUSH_ENABLED=false` as a hard
@@ -155,7 +155,7 @@ write-refusal at the provider level.
 ## Roadmap
 
 - [x] GitHub Issues provider (dogfooded on this repo's own issues)
-- [ ] Jira + Linear providers (see Integrations above)
+- [x] Jira + Linear providers (see Integrations above)
 - [ ] Slack adapter alongside Telegram
 - [ ] Demo mode with pre-recorded agent sessions (no LLM key needed)
 - [ ] Self-host quickscript + Helm chart

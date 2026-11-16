@@ -109,6 +109,15 @@ class Settings(BaseSettings):
     # statusCategory says.
     jira_review_statuses: str = "In Review,Review,Code Review"
 
+    # Linear (INTEGRATION_PROVIDER=linear)
+    # API key auth (Settings -> Security & access); team key scopes writes
+    # and sprints, inferred from the first synced issue when empty.
+    linear_api_key: str = ""
+    linear_team_key: str = ""          # e.g. "ENG"
+    # Comma-separated workflow state names that mean "review" whatever
+    # their type says.
+    linear_review_statuses: str = "In Review,Review,Code Review"
+
     tfs_sync_interval: int = 300  # periodic pull interval (seconds)
     # Whether the periodic beat job auto-pulls from the external task provider.
     # OFF by default: the mock provider mints a fresh external_id each run, so a
