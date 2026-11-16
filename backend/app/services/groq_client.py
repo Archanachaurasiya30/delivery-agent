@@ -11,8 +11,10 @@ reasoning and return empty content with finish_reason="length" — surfaced as a
 intentionally untouched.
 """
 
+import asyncio
 import json
 import logging
+import random
 
 import httpx
 
@@ -22,6 +24,23 @@ from app.integrations.demo_llm import demo_completion
 logger = logging.getLogger(__name__)
 
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+# Transient failures worth one more attempt; every other status fails fast.
+RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+
+def _retry_delay(attempt: int, response: httpx.Response | None) -> float:
+    """Backoff for retry `attempt` (0-based): 0.5 * 2**attempt s ±25% jitter.
+
+    A Retry-After header in seconds wins, capped at 5s so a bad header can't
+    stall the request.
+    """
+    if response is not None:
+        try:
+            return min(float(response.headers["Retry-After"]), 5.0)
+        except (KeyError, ValueError):
+            pass
+    return 0.5 * 2**attempt * random.uniform(0.75, 1.25)
 
 
 class GroqError(RuntimeError):
@@ -68,7 +87,8 @@ async def groq_chat(
     In DEMO_MODE, replay a pre-recorded response instead (no API key needed).
 
     Raises :class:`GroqError` on a missing key, transport failure, non-200
-    response, or empty content.
+    response, or empty content. Transient failures (429/5xx, transport
+    errors) are retried up to 2 times with backoff before giving up.
     """
     if settings.demo_mode:
         return demo_completion(messages)
@@ -87,28 +107,51 @@ async def groq_chat(
     if "gpt-oss" in settings.groq_model:
         payload["reasoning_effort"] = settings.groq_reasoning_effort
 
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                GROQ_CHAT_URL,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {settings.groq_api_key}",
-                },
-                json=payload,
-            )
-    except httpx.HTTPError as exc:
-        logger.error(f"Groq API request failed: {exc}")
-        raise GroqError(f"Groq API request failed: {exc}") from exc
+    # ponytail: fixed 3 attempts, plain loop — circuit breaker only if Groq
+    # outages ever make this the bottleneck.
+    response: httpx.Response | None = None
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    GROQ_CHAT_URL,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {settings.groq_api_key}",
+                    },
+                    json=payload,
+                )
+        except httpx.HTTPError as exc:
+            # Transport errors (connect/read) are transient; other HTTPError
+            # subclasses are not worth another attempt.
+            if isinstance(exc, httpx.TransportError) and attempt < 2:
+                delay = _retry_delay(attempt, None)
+                logger.warning(f"Groq request failed ({exc}), retrying in {delay:.2f}s")
+                await asyncio.sleep(delay)
+                continue
+            logger.error(f"Groq API request failed: {exc}")
+            raise GroqError(f"Groq API request failed: {exc}") from exc
 
-    if response.status_code != 200:
+        if response.status_code == 200:
+            break
+
         try:
             detail = response.json().get("error", {}).get("message", "Unknown error")
         except Exception:  # noqa: BLE001 - error body may not be JSON
             detail = response.text[:200]
+
+        if response.status_code in RETRYABLE_STATUSES and attempt < 2:
+            delay = _retry_delay(attempt, response)
+            logger.warning(
+                f"Groq API {response.status_code} ({detail}), retrying in {delay:.2f}s"
+            )
+            await asyncio.sleep(delay)
+            continue
+
         logger.error(f"Groq API error: {response.status_code} - {detail}")
         raise GroqError(f"Groq API error: {detail}")
 
+    assert response is not None  # loop exits only via break-on-200 or raise
     choice = response.json()["choices"][0]
     content = choice["message"].get("content") or ""
     finish_reason = choice.get("finish_reason")
