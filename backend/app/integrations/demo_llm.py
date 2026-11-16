@@ -235,6 +235,40 @@ _TRIAGE = [
     },
 ]
 
+# ------------------------------------------------------- release notes
+# Markdown (not JSON) — the sprint_service passes the sprint's done items and
+# expects a shareable changelog back.
+_RELEASE_NOTES = [
+    (
+        "## Sprint 2403 — Storefront\n\n"
+        "Storefront closed out the order-status journeys and the group-order "
+        "rollout reached iOS, while the AI workforce shipped its first "
+        "customer-visible change.\n\n"
+        "### Features\n"
+        "- Completed the order-status journeys (#4105, #4106) — Storefront\n"
+        "- Group-order invites merged for iOS (#4112, #4113) — Storefront\n"
+        "- Dynamic order templates for confirmation mails (#4120) — Storefront\n\n"
+        "### Bug fixes\n"
+        "- Notification-flag regression fixed by the autonomous agent, tests "
+        "green (#4117) — Storefront\n\n"
+        "### Other\n"
+        "- Elastic logging scaffold drafted for #4119 — Loyalty & Infra\n"
+    ),
+    (
+        "## Sprint 2403 — Storefront\n\n"
+        "A release focused on finishing: the remaining storefront journeys "
+        "landed and the automation cycle protected the release train.\n\n"
+        "### Features\n"
+        "- Order-status journeys shipped end to end (#4105, #4106) — Storefront\n"
+        "- Saved-address selection shipped on iOS (#4113) — Storefront\n\n"
+        "### Bug fixes\n"
+        "- Group-order invite edge cases fixed ahead of the iOS merge "
+        "(#4112) — Storefront\n\n"
+        "### Other\n"
+        "- Release-automation cycle completed (#4108) — Loyalty & Infra\n"
+    ),
+]
+
 # ------------------------------------------------------- ask-the-DM answers
 _ASK = [
     (
@@ -277,6 +311,7 @@ _KINDS: tuple[tuple[str, list], ...] = (
     ("blocked or stuck work items", _BLOCKERS),
     ("candidate backlog items", _SPRINT_PLAN),
     ("release readiness facts", _RELEASE),
+    ("draft release notes", _RELEASE_NOTES),
     ("morning brief", _BRIEF),
     ("autonomous ai coding agent", _TRIAGE),
 )

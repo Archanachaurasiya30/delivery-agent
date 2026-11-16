@@ -1,5 +1,6 @@
 """Sprint service for business logic."""
 
+import json
 import logging
 from datetime import date, timedelta
 from typing import Any
@@ -8,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.proposal import Proposal
 from app.models.sprint import Sprint
 from app.models.task import Task
 from app.schemas.sprint import (
@@ -17,12 +19,19 @@ from app.schemas.sprint import (
     SprintUpdate,
     SprintWithStats,
 )
+from app.services.groq_client import groq_chat
 
 logger = logging.getLogger(__name__)
 
 
 class SprintNotFoundError(Exception):
     """Raised when sprint is not found."""
+
+    pass
+
+
+class PendingReleaseNotesError(Exception):
+    """Raised when a release-notes draft for this sprint awaits review."""
 
     pass
 
@@ -331,3 +340,69 @@ class SprintService:
             select(Sprint).where(Sprint.status == "active").limit(1)
         )
         return result.scalar_one_or_none()
+
+    async def draft_release_notes(self, sprint_id: UUID) -> Proposal:
+        """Draft markdown release notes from a sprint's done work.
+
+        The facts (done tasks) come from the DB; the LLM only words them into
+        a grouped changelog. Returns a ``release_notes`` proposal in
+        ``pending_review`` — nothing is pushed anywhere until a human approves.
+        """
+        sprint = await self.get_sprint(sprint_id)
+
+        pending = (
+            await self.db.execute(
+                select(Proposal).where(
+                    Proposal.type == "release_notes",
+                    Proposal.state == "pending_review",
+                )
+            )
+        ).scalars()
+        for p in pending:
+            if (p.content or {}).get("sprint_id") == str(sprint_id):
+                raise PendingReleaseNotesError(
+                    f"A release-notes draft for {sprint.name} is already pending review."
+                )
+
+        done = await self.get_sprint_tasks(sprint_id, status="done")
+        facts = [
+            {
+                "item": f"#{t.external_id}" if t.external_id else f"#{t.id[:8]}",
+                "title": t.title,
+                "type": t.work_item_type,
+                "area": t.project_name,
+            }
+            for t in done
+        ]
+        markdown = await groq_chat(
+            [
+                {
+                    "role": "system",
+                    "content": "You are a technical writer drafting release notes. "
+                    "Return markdown only.",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Draft release notes for {sprint.name} (ended {sprint.end_date}). "
+                        f"Done items (facts — use only these, one bullet each, grouped under "
+                        f"Features / Bug fixes / Other, every bullet references its item id):\n"
+                        f"{json.dumps(facts, ensure_ascii=False)}\n"
+                        "Start with a one-line summary and a `## <sprint name>` heading."
+                    ),
+                },
+            ]
+        )
+
+        proposal = Proposal(
+            type="release_notes",
+            state="pending_review",
+            content={"sprint_id": str(sprint_id), "markdown": markdown},
+            reasoning=f"Release notes draft for {sprint.name} from {len(done)} done item(s).",
+            confidence="medium",
+            created_by_agent="release-notes",
+        )
+        self.db.add(proposal)
+        await self.db.flush()
+        await self.db.refresh(proposal)
+        return proposal

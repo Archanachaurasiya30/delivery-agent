@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.agent import ProposalResponse
 from app.database import get_db
 from app.schemas.sprint import (
     SprintBurndown,
@@ -17,7 +18,11 @@ from app.schemas.sprint import (
     TaskToSprintRequest,
 )
 from app.schemas.task import TaskListResponse, TaskResponse
-from app.services.sprint_service import SprintNotFoundError, SprintService
+from app.services.sprint_service import (
+    PendingReleaseNotesError,
+    SprintNotFoundError,
+    SprintService,
+)
 
 router = APIRouter(prefix="/sprints", tags=["sprints"])
 logger = logging.getLogger(__name__)
@@ -169,6 +174,33 @@ async def complete_sprint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
+
+
+@router.post(
+    "/{sprint_id}/release-notes",
+    response_model=ProposalResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def draft_release_notes(
+    sprint_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> ProposalResponse:
+    """Draft release notes from a sprint's done work → pending_review proposal."""
+    service = SprintService(db)
+    try:
+        proposal = await service.draft_release_notes(sprint_id)
+        await db.commit()
+    except SprintNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Sprint not found: {sprint_id}",
+        )
+    except PendingReleaseNotesError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        )
+    return ProposalResponse.model_validate(proposal, from_attributes=True)
 
 
 @router.get("/{sprint_id}/tasks", response_model=TaskListResponse)

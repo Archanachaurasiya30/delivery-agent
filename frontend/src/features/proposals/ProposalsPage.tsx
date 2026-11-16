@@ -278,10 +278,11 @@ export function ProposalsPage() {
                 {!isCodingPr(selectedProposal) && selectedProposal.content && (() => {
                   const c: any = selectedProposal.content;
                   const agentText: string | null = typeof c?.content === 'string' ? c.content : null;
+                  const mdText: string | null = typeof c?.markdown === 'string' ? c.markdown : null;
                   const toolCalls: any[] = Array.isArray(c?.tool_calls) ? c.tool_calls : [];
                   // A proposal that hasn't been processed yet only carries the
                   // original request payload — there's no agent output to show.
-                  const isUnprocessed = agentText === null && c?.request_payload !== undefined;
+                  const isUnprocessed = agentText === null && mdText === null && c?.request_payload !== undefined;
 
                   return (
                     <div className="proposal-detail-section">
@@ -294,6 +295,8 @@ export function ProposalsPage() {
                         </div>
                       ) : agentText !== null ? (
                         <div className="proposal-pre">{agentText}</div>
+                      ) : mdText !== null ? (
+                        <pre className="proposal-pre" style={{ whiteSpace: 'pre-wrap' }}>{mdText}</pre>
                       ) : (
                         <pre className="proposal-pre">{JSON.stringify(c, null, 2)}</pre>
                       )}
